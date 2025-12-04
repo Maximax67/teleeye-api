@@ -1,0 +1,17 @@
+aiogram
+cryptography
+fastapi
+fastapi-pagination
+pybloom_live
+pydantic
+pydantic_settings
+slowapi
+uvicorn
+PyJWT
+passlib
+bcrypt<4
+email-validator
+httpx
+user_agents
+sqlalchemy
+alembic
