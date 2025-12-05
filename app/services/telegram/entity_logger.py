@@ -1,8 +1,10 @@
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Type
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     String,
     case,
+    cast,
     column,
     insert,
     literal,
@@ -247,57 +249,43 @@ async def check_entities(
     bf = aliased(BotFile)
 
     chat_query = select(
-        chat_cte.c.chat_id,
-        literal(None).label("user_id"),
-        literal(None).label("message_id"),
-        literal(None).label("file_unique_id"),
+        cast(chat_cte.c.chat_id, BigInteger),
+        cast(None, BigInteger).label("user_id"),
+        cast(None, BigInteger).label("message_id"),
+        cast(None, String).label("file_unique_id"),
         case((tc.id.is_not(None), True), else_=False).label("exists"),
-        literal(None).label("bot_relation"),
+        cast(None, Boolean).label("bot_relation"),
         literal(EntityCheckResultType.CHAT.value).label("type"),
-    ).outerjoin(tc, tc.id == chat_cte.c.chat_id)
-
-    user_query = select(
-        literal(None).label("chat_id"),
-        user_cte.c.user_id,
-        literal(None).label("message_id"),
-        literal(None).label("file_unique_id"),
-        case((tu.id.is_not(None), True), else_=False).label("exists"),
-        literal(None).label("bot_relation"),
-        literal(EntityCheckResultType.USER.value).label("type"),
-    ).outerjoin(tu, tu.id == user_cte.c.user_id)
-
-    msg_query = (
-        select(
-            msg_cte.c.chat_id,
-            literal(None).label("user_id"),
-            msg_cte.c.message_id,
-            literal(None).label("file_unique_id"),
-            case((tm.id.is_not(None), True), else_=False).label("exists"),
-            case((bm.message_id.is_not(None), True), else_=False).label("bot_relation"),
-            literal(EntityCheckResultType.MESSAGE.value).label("type"),
-        )
-        .outerjoin(
-            tm, (tm.chat_id == msg_cte.c.chat_id) & (tm.id == msg_cte.c.message_id)
-        )
-        .outerjoin(bm, (bm.message_id == msg_cte.c.message_id) & (bm.bot_id == bot_id))
     )
 
-    file_query = (
-        select(
-            literal(None).label("chat_id"),
-            literal(None).label("user_id"),
-            literal(None).label("message_id"),
-            file_cte.c.file_unique_id,
-            case((tf.file_unique_id.is_not(None), True), else_=False).label("exists"),
-            case((bf.file_unique_id.is_not(None), True), else_=False).label(
-                "bot_relation"
-            ),
-            literal(EntityCheckResultType.FILE.value).label("type"),
-        )
-        .outerjoin(tf, tf.file_unique_id == file_cte.c.file_unique_id)
-        .outerjoin(
-            bf, (bf.file_unique_id == file_cte.c.file_unique_id) & (bf.bot_id == bot_id)
-        )
+    user_query = select(
+        cast(None, BigInteger).label("chat_id"),
+        cast(user_cte.c.user_id, BigInteger),
+        cast(None, BigInteger).label("message_id"),
+        cast(None, String).label("file_unique_id"),
+        case((tu.id.is_not(None), True), else_=False).label("exists"),
+        cast(None, Boolean).label("bot_relation"),
+        literal(EntityCheckResultType.USER.value).label("type"),
+    )
+
+    msg_query = select(
+        cast(msg_cte.c.chat_id, BigInteger),
+        cast(None, BigInteger).label("user_id"),
+        cast(msg_cte.c.message_id, BigInteger),
+        cast(None, String).label("file_unique_id"),
+        case((tm.id.is_not(None), True), else_=False).label("exists"),
+        case((bm.message_id.is_not(None), True), else_=False).label("bot_relation"),
+        literal(EntityCheckResultType.MESSAGE.value).label("type"),
+    )
+
+    file_query = select(
+        cast(None, BigInteger).label("chat_id"),
+        cast(None, BigInteger).label("user_id"),
+        cast(None, BigInteger).label("message_id"),
+        cast(file_cte.c.file_unique_id, String),
+        case((tf.file_unique_id.is_not(None), True), else_=False).label("exists"),
+        case((bf.file_unique_id.is_not(None), True), else_=False).label("bot_relation"),
+        literal(EntityCheckResultType.FILE.value).label("type"),
     )
 
     full_query = chat_query.union_all(user_query, msg_query, file_query)
