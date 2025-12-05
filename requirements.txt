@@ -16,3 +16,4 @@ user_agents
 sqlalchemy
 alembic
 asyncpg
+python-telegram-bot
