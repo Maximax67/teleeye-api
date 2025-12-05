@@ -342,7 +342,7 @@ async def refresh(
 ) -> TokensResponse:
     session_name = get_session_name_from_user_agent(request)
     access, refresh, expires_in, refresh_expires_in = await rotate_refresh_token(
-        db, refresh_payload["sub"], refresh_payload["jti"], session_name
+        db, int(refresh_payload["sub"]), refresh_payload["jti"], session_name
     )
 
     return TokensResponse(

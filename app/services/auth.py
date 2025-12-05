@@ -101,7 +101,7 @@ def authorize_user(
         raise HTTPException(status_code=401, detail="Invalid token")
 
     try:
-        user_id = payload["sub"]
+        user_id = int(payload["sub"])
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid subject in token")
 
