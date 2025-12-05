@@ -256,7 +256,7 @@ async def check_entities(
         case((tc.id.is_not(None), True), else_=False).label("exists"),
         cast(None, Boolean).label("bot_relation"),
         literal(EntityCheckResultType.CHAT.value).label("type"),
-    )
+    ).outerjoin(tc, tc.id == chat_cte.c.chat_id)
 
     user_query = select(
         cast(None, BigInteger).label("chat_id"),
@@ -266,26 +266,40 @@ async def check_entities(
         case((tu.id.is_not(None), True), else_=False).label("exists"),
         cast(None, Boolean).label("bot_relation"),
         literal(EntityCheckResultType.USER.value).label("type"),
+    ).outerjoin(tu, tu.id == user_cte.c.user_id)
+
+    msg_query = (
+        select(
+            cast(msg_cte.c.chat_id, BigInteger),
+            cast(None, BigInteger).label("user_id"),
+            cast(msg_cte.c.message_id, BigInteger),
+            cast(None, String).label("file_unique_id"),
+            case((tm.id.is_not(None), True), else_=False).label("exists"),
+            case((bm.message_id.is_not(None), True), else_=False).label("bot_relation"),
+            literal(EntityCheckResultType.MESSAGE.value).label("type"),
+        )
+        .outerjoin(
+            tm, (tm.chat_id == msg_cte.c.chat_id) & (tm.id == msg_cte.c.message_id)
+        )
+        .outerjoin(bm, (bm.message_id == msg_cte.c.message_id) & (bm.bot_id == bot_id))
     )
 
-    msg_query = select(
-        cast(msg_cte.c.chat_id, BigInteger),
-        cast(None, BigInteger).label("user_id"),
-        cast(msg_cte.c.message_id, BigInteger),
-        cast(None, String).label("file_unique_id"),
-        case((tm.id.is_not(None), True), else_=False).label("exists"),
-        case((bm.message_id.is_not(None), True), else_=False).label("bot_relation"),
-        literal(EntityCheckResultType.MESSAGE.value).label("type"),
-    )
-
-    file_query = select(
-        cast(None, BigInteger).label("chat_id"),
-        cast(None, BigInteger).label("user_id"),
-        cast(None, BigInteger).label("message_id"),
-        cast(file_cte.c.file_unique_id, String),
-        case((tf.file_unique_id.is_not(None), True), else_=False).label("exists"),
-        case((bf.file_unique_id.is_not(None), True), else_=False).label("bot_relation"),
-        literal(EntityCheckResultType.FILE.value).label("type"),
+    file_query = (
+        select(
+            cast(None, BigInteger).label("chat_id"),
+            cast(None, BigInteger).label("user_id"),
+            cast(None, BigInteger).label("message_id"),
+            cast(file_cte.c.file_unique_id, String),
+            case((tf.file_unique_id.is_not(None), True), else_=False).label("exists"),
+            case((bf.file_unique_id.is_not(None), True), else_=False).label(
+                "bot_relation"
+            ),
+            literal(EntityCheckResultType.FILE.value).label("type"),
+        )
+        .outerjoin(tf, tf.file_unique_id == file_cte.c.file_unique_id)
+        .outerjoin(
+            bf, (bf.file_unique_id == file_cte.c.file_unique_id) & (bf.bot_id == bot_id)
+        )
     )
 
     full_query = chat_query.union_all(user_query, msg_query, file_query)
