@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from sqlalchemy import (
     BigInteger,
+    DateTime,
     ForeignKey,
     String,
     func,
@@ -31,6 +32,7 @@ class BotFile(Base):
     file_id: Mapped[str] = mapped_column(String, nullable=False)
 
     timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
     )

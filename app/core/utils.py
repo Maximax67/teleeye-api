@@ -20,12 +20,10 @@ from app.schemas.auth import AuthorizedUser
 async def cleanup_old_data() -> None:
     logger.info("Cleanup old database data")
 
-    cutoff_sessions = (
-        datetime.now(timezone.utc) - timedelta(days=settings.REFRESH_TOKEN_EXPIRES_DAYS)
-    ).replace(tzinfo=None)
-    cutoff_otp = (
-        datetime.now(timezone.utc) - timedelta(minutes=settings.OTP_TTL)
-    ).replace(tzinfo=None)
+    cutoff_sessions = datetime.now(timezone.utc) - timedelta(
+        days=settings.REFRESH_TOKEN_EXPIRES_DAYS
+    )
+    cutoff_otp = datetime.now(timezone.utc) - timedelta(minutes=settings.OTP_TTL)
 
     try:
         async with async_session() as db:

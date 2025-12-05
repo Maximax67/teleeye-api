@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from sqlalchemy import (
     JSON,
     BigInteger,
+    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -63,8 +64,10 @@ class TelegramMessage(Base):
         uselist=False,
     )
 
-    date: Mapped[datetime] = mapped_column(nullable=False)
-    edit_date: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    edit_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     sender_boost_count: Mapped[Optional[int]] = mapped_column(nullable=True)
 

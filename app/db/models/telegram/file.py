@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
-from sqlalchemy import JSON, BigInteger, Enum, String, func
+from sqlalchemy import JSON, BigInteger, DateTime, Enum, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.enums import FileType
 from app.db.base import Base
@@ -26,7 +26,7 @@ class TelegramFile(Base):
     other_data: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=True)
 
     timestamp: Mapped[datetime] = mapped_column(
-        server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     bots: Mapped[List["BotFile"]] = relationship(
