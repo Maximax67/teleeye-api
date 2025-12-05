@@ -17,10 +17,7 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    HOME=/root \
-    ATTACH_FRONTEND=1 \
-    FRONTEND_PATH=./static \
-    API_PREFIX=/api
+    HOME=/root
 
 WORKDIR /app
 

@@ -15,3 +15,4 @@ httpx
 user_agents
 sqlalchemy
 alembic
+asyncpg
