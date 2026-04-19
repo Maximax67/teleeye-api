@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     ALLOWED_ORIGINS: str
     DATABASE_URL: SecretStr
+    DATABASE_ECHO: bool = False
 
     API_URL: HttpUrl
     JWT_SECRET: SecretStr
