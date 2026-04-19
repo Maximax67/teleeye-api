@@ -1,12 +1,12 @@
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import delete, exists, insert, select, and_, func, update
+from sqlalchemy import delete, exists, insert, or_, select, and_, func, update
 from sqlalchemy.orm import joinedload, aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi_pagination import Page, Params
 
-from app.core.enums import UserRole
+from app.core.enums import ChatType, UserRole
 from app.core.limiter import limiter
 from app.core.logger import logger
 from app.core.dependencies import require_authorization
@@ -54,6 +54,20 @@ common_responses: Dict[Union[int, str], Dict[str, Any]] = {
 }
 
 
+def _parse_chat_types(chat_types: Optional[str]) -> List[ChatType]:
+    """Parse comma-separated chat type string into a list of ChatType enums."""
+    if not chat_types:
+        return []
+    result = []
+    for ct in chat_types.split(","):
+        ct = ct.strip()
+        try:
+            result.append(ChatType(ct))
+        except ValueError:
+            pass
+    return result
+
+
 @router.get(
     "",
     response_model=Page[Dict[str, Any]],
@@ -71,6 +85,14 @@ async def list_accessible_chats(
         None,
         description="Comma-separated bot IDs. If provided, only chats where these bots have messages are included.",
     ),
+    chat_types: Optional[str] = Query(
+        None,
+        description="Comma-separated chat types to filter: private,group,supergroup,channel",
+    ),
+    search: Optional[str] = Query(
+        None,
+        description="Search in chat title, username or name (case-insensitive)",
+    ),
     current_user: AuthorizedUser = Depends(require_authorization),
     db: AsyncSession = Depends(get_db),
     params: Params = Depends(),
@@ -80,16 +102,21 @@ async def list_accessible_chats(
     requested_bot_ids = await parse_bot_param(bots)
     await check_bot_access(db, current_user.id, requested_bot_ids, is_admin)
 
+    valid_chat_types = _parse_chat_types(chat_types)
+    search_term = f"%{search}%" if search else None
+
     bm = BotMessage
     ub = UserBot
     tc = TelegramChat
     rm = ReadMessages
 
+    # ── Build subquery for latest message per chat ──────────────────────────
     last_msg_sub_stmt = select(
         bm.chat_id.label("chat_id"),
         func.max(bm.message_id).label("last_message_id"),
-    ).group_by(bm.chat_id)
+    )
 
+    # User/bot access filter
     if requested_bot_ids:
         last_msg_sub_stmt = last_msg_sub_stmt.where(bm.bot_id.in_(requested_bot_ids))
     elif not is_admin:
@@ -97,10 +124,31 @@ async def list_accessible_chats(
             ub.user_id == current_user.id
         )
 
+    # Chat type / search filter applied to the subquery so the count is accurate
+    if valid_chat_types or search_term:
+        last_msg_sub_stmt = last_msg_sub_stmt.join(
+            TelegramChat, TelegramChat.id == bm.chat_id
+        )
+        if valid_chat_types:
+            last_msg_sub_stmt = last_msg_sub_stmt.where(
+                TelegramChat.type.in_(valid_chat_types)
+            )
+        if search_term:
+            last_msg_sub_stmt = last_msg_sub_stmt.where(
+                or_(
+                    TelegramChat.title.ilike(search_term),
+                    TelegramChat.username.ilike(search_term),
+                    TelegramChat.first_name.ilike(search_term),
+                    TelegramChat.last_name.ilike(search_term),
+                )
+            )
+
+    last_msg_sub_stmt = last_msg_sub_stmt.group_by(bm.chat_id)
     last_msg_sub = last_msg_sub_stmt.subquery()
 
     last_msg = aliased(TelegramMessage)
 
+    # Total count (honours all filters)
     count_q = await db.execute(select(func.count()).select_from(last_msg_sub))
     total = count_q.scalar_one()
 
@@ -124,22 +172,21 @@ async def list_accessible_chats(
 
     rows = (await db.execute(stmt)).all()
 
-    items: List[Dict[str, Any]] = []
-
-    chat_read_map = defaultdict(list)
+    chat_read_map: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for chat, _, thread_id, msg_id in rows:
         if thread_id is not None:
             chat_read_map[chat.id].append(
                 {"message_thread_id": thread_id, "message_id": msg_id}
             )
 
+    items: List[Dict[str, Any]] = []
     for chat, message, *_ in rows:
         chat_dict = chat.to_dict()
         chat_dict["last_message"] = serialize_message(message)
         chat_dict["read_messages"] = chat_read_map.get(chat.id, [])
         items.append(chat_dict)
 
-    pages = (total + params.size - 1) // params.size
+    pages = max(1, (total + params.size - 1) // params.size)
 
     return Page(
         total=total,
@@ -283,7 +330,7 @@ async def list_chat_messages_cursor(
     request: Request,
     response: Response,
     bots: Optional[str] = Query(
-        None, description="Comma-separated bot ids to filter by. Example: bot=123,456"
+        None, description="Comma-separated bot ids to filter by."
     ),
     message_thread_id: Optional[int] = Query(None, ge=1),
     limit: int = Query(
@@ -291,11 +338,21 @@ async def list_chat_messages_cursor(
     ),
     before_id: Optional[int] = Query(
         None,
-        description="Fetch messages with message_id < before_id (cursor). If omitted, fetch newest.",
+        description="Fetch messages with message_id < before_id (load older). Mutually exclusive with after_id.",
+    ),
+    after_id: Optional[int] = Query(
+        None,
+        description="Fetch messages with message_id > after_id in ascending order (load newer). Mutually exclusive with before_id.",
     ),
     current_user: AuthorizedUser = Depends(require_authorization),
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
+    if before_id is not None and after_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="before_id and after_id are mutually exclusive",
+        )
+
     requested_bot_ids = await parse_bot_param(bots)
     is_admin = current_user.role in (UserRole.ADMIN, UserRole.GOD)
     await check_bot_access(db, current_user.id, requested_bot_ids, is_admin)
@@ -305,7 +362,7 @@ async def list_chat_messages_cursor(
     ub = UserBot
 
     join_condition = and_(bm.chat_id == tm.chat_id, bm.message_id == tm.id)
-    stmt = (
+    base_stmt = (
         select(tm)
         .join(bm, join_condition)
         .where(bm.chat_id == chat_id)
@@ -317,38 +374,62 @@ async def list_chat_messages_cursor(
     )
 
     if requested_bot_ids:
-        stmt = stmt.where(bm.bot_id.in_(requested_bot_ids))
+        base_stmt = base_stmt.where(bm.bot_id.in_(requested_bot_ids))
     elif not is_admin:
-        stmt = stmt.join(ub, ub.bot_id == bm.bot_id).where(
+        base_stmt = base_stmt.join(ub, ub.bot_id == bm.bot_id).where(
             ub.user_id == current_user.id
         )
 
     if message_thread_id:
-        stmt = stmt.where(tm.message_thread_id == message_thread_id)
+        base_stmt = base_stmt.where(tm.message_thread_id == message_thread_id)
 
-    if before_id:
-        stmt = stmt.where(tm.id < before_id)
+    if after_id is not None:
+        stmt = base_stmt.where(tm.id > after_id).order_by(tm.id.asc()).limit(limit + 1)
+        result = await db.execute(stmt)
+        messages = result.scalars().all()
 
-    stmt = stmt.order_by(tm.id.desc()).limit(
-        limit + 1
-    )  # fetch one extra to detect `has_more`
+        has_more_newer = len(messages) > limit
+        if has_more_newer:
+            messages = messages[:limit]
 
-    result = await db.execute(stmt)
-    messages = result.scalars().all()
+        # Assume there are older messages if after_id > 0
+        has_more_older = after_id > 0
 
-    if not messages:
-        raise HTTPException(
-            status_code=404, detail="Chat not found or no accessible messages"
-        )
+        items = [serialize_message(m) for m in messages]
 
-    has_more = len(messages) > limit
-    if has_more:
-        messages = messages[:limit]
+        return {
+            "items": items,
+            "has_more_older": has_more_older,
+            "has_more_newer": has_more_newer,
+        }
 
-    items = [serialize_message(m) for m in messages]
-    next_cursor = items[-1]["message_id"] if has_more and items else None
+    else:
+        stmt = base_stmt
+        if before_id is not None:
+            stmt = stmt.where(tm.id < before_id)
 
-    return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
+        stmt = stmt.order_by(tm.id.desc()).limit(limit + 1)
+        result = await db.execute(stmt)
+        messages = result.scalars().all()
+
+        if not messages:
+            raise HTTPException(
+                status_code=404, detail="Chat not found or no accessible messages"
+            )
+
+        has_more_older = len(messages) > limit
+        if has_more_older:
+            messages = messages[:limit]
+
+        has_more_newer = before_id is not None
+
+        items = [serialize_message(m) for m in messages]
+
+        return {
+            "items": items,
+            "has_more_older": has_more_older,
+            "has_more_newer": has_more_newer,
+        }
 
 
 @router.put(
