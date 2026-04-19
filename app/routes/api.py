@@ -1,8 +1,11 @@
 from typing import Dict
 from urllib.parse import urljoin
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.settings import settings
+from app.db.session import get_db
 from app.schemas.common_responses import DetailResponse
 from app.routes import auth, users
 from app.routes.telegram import telegram
@@ -24,8 +27,17 @@ def info(request: Request, response: Response) -> Dict[str, str]:
 
 @router.get("/health", response_model=DetailResponse, tags=["root"])
 @limiter.limit("10/minute")
-def health_check(request: Request, response: Response) -> DetailResponse:
-    return DetailResponse(detail="ok")
+async def health_check(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> DetailResponse:
+    try:
+        await db.execute(text("SELECT 1"))
+        return DetailResponse(detail="ok")
+    except Exception:
+        response.status_code = 503
+        return DetailResponse(detail="database unavailable")
 
 
 router.include_router(auth.router)
