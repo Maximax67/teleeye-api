@@ -1,0 +1,38 @@
+name: Code check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  code_check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run ruff
+        run: ruff check . --output-format github
+
+      - name: Add mypy annotator
+        uses: pr-annotators/mypy-pr-annotator@v1.0.0
+
+      - uses: actions/cache@v4
+        name: Cache mypy
+        with:
+          path: ./.mypy_cache
+          key: mypy-cache-${{ runner.os }}-${{ hashFiles('requirements*.txt', 'pyproject.toml', 'mypy.ini') }}
+          restore-keys: |
+            mypy-cache-${{ runner.os }}-
+
+      - name: Run mypy
+        run: mypy --strict .
