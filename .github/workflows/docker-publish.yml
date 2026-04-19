@@ -30,6 +30,8 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/teleeye:latest
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/teleeye:latest
+            ${{ secrets.DOCKER_USERNAME }}/teleeye:sha-${{ github.sha }}
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
