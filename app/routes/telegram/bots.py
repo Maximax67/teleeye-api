@@ -14,7 +14,7 @@ from fastapi import (
     Response,
 )
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from telegram import Message, Update
 from telegram.error import TelegramError
@@ -302,18 +302,20 @@ async def list_bots(
         )
 
     q = await db.execute(
-        select(Bot, Bot.telegram_user, UserBot.role).outerjoin(
+        select(Bot, UserBot.role)
+        .outerjoin(
             UserBot, (UserBot.bot_id == Bot.id) & (UserBot.user_id == current_user.id)
         )
+        .options(joinedload(Bot.telegram_user))
     )
 
-    for bot, telegram_user, role in q.all():
+    for bot, role in q.all():
         bots.append(
             BotResponse(
                 id=bot.id,
-                first_name=telegram_user.first_name,
-                last_name=telegram_user.last_name,
-                username=telegram_user.username,
+                first_name=bot.telegram_user.first_name,
+                last_name=bot.telegram_user.last_name,
+                username=bot.telegram_user.username,
                 can_join_groups=bot.can_join_groups,
                 can_read_all_group_messages=bot.can_read_all_group_messages,
                 supports_inline_queries=bot.supports_inline_queries,
