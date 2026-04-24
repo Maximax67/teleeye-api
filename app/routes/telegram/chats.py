@@ -21,6 +21,7 @@ from app.schemas.telegram.chat import ReadRequest
 from app.services.telegram.bots import get_bot_by_chat, get_bot_by_id
 from app.services.telegram.chats import (
     check_bot_access,
+    get_message_options,
     parse_bot_param,
     serialize_message,
 )
@@ -611,7 +612,7 @@ async def list_chat_threads(
         )
 
     # Get all messages with thread_id
-    thread_stmt = base_stmt.where(tm.message_thread_id.isnot(None))
+    thread_stmt = base_stmt.where(tm.message_thread_id.isnot(None)).options(*get_message_options())
     result = await db.execute(thread_stmt)
     messages = result.scalars().all()
 
