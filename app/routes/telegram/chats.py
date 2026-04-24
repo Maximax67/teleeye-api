@@ -567,3 +567,90 @@ async def delete_chat_read_marks(
     await db.commit()
 
     return Response(status_code=204)
+
+
+@router.get(
+    "/{chat_id}/threads",
+    response_model=Dict[str, Any],
+    responses=common_responses,
+)
+@limiter.limit("10/minute")
+async def list_chat_threads(
+    chat_id: int,
+    request: Request,
+    response: Response,
+    bots: Optional[str] = Query(
+        None, description="Comma-separated bot IDs to filter by"
+    ),
+    current_user: AuthorizedUser = Depends(require_authorization),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """List all message threads in a chat, similar to Telegram's topic list."""
+    requested_bot_ids = await parse_bot_param(bots)
+    is_admin = current_user.role in (UserRole.ADMIN, UserRole.GOD)
+    await check_bot_access(db, current_user.id, requested_bot_ids, is_admin)
+
+    tm = TelegramMessage
+    bm = BotMessage
+    ub = UserBot
+    rm = ReadMessages
+
+    # Build base query for messages in this chat
+    join_condition = and_(bm.chat_id == tm.chat_id, bm.message_id == tm.id)
+    base_stmt = (
+        select(tm)
+        .join(bm, join_condition)
+        .where(bm.chat_id == chat_id)
+    )
+
+    if requested_bot_ids:
+        base_stmt = base_stmt.where(bm.bot_id.in_(requested_bot_ids))
+    elif not is_admin:
+        base_stmt = base_stmt.join(ub, ub.bot_id == bm.bot_id).where(
+            ub.user_id == current_user.id
+        )
+
+    # Get all messages with thread_id
+    thread_stmt = base_stmt.where(tm.message_thread_id.isnot(None))
+    result = await db.execute(thread_stmt)
+    messages = result.scalars().all()
+
+    if not messages:
+        return {"items": []}
+
+    # Group messages by thread_id and get the latest message for each thread
+    threads_map: Dict[int, List[TelegramMessage]] = defaultdict(list)
+    for msg in messages:
+        thread_id = msg.message_thread_id or 1
+        threads_map[thread_id].append(msg)
+
+    # Build thread items with latest message and read status
+    items: List[Dict[str, Any]] = []
+    for thread_id, thread_messages in threads_map.items():
+        # Sort by message_id descending to get the latest
+        thread_messages.sort(key=lambda m: m.id, reverse=True)
+        latest_msg = thread_messages[0]
+
+        # Get read status for this thread
+        read_stmt = select(rm.message_id).where(
+            rm.user_id == current_user.id,
+            rm.chat_id == chat_id,
+            rm.message_thread_id == thread_id,
+        )
+        read_result = await db.execute(read_stmt)
+        read_message_id = read_result.scalar_one_or_none() or 0
+
+        # Count unread messages in this thread
+        unread_count = sum(1 for m in thread_messages if m.id > read_message_id)
+
+        items.append({
+            "thread_id": thread_id,
+            "last_message": serialize_message(latest_msg),
+            "unread_count": unread_count,
+            "message_count": len(thread_messages),
+        })
+
+    # Sort by latest message date descending
+    items.sort(key=lambda x: x["last_message"]["date"], reverse=True)
+
+    return {"items": items}
